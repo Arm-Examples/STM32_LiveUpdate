@@ -1,0 +1,70 @@
+project:
+  packs:
+    - pack: ARM::CMSIS@^6.2.0
+    - pack: ARM::CMSIS-Compiler@^2.1.0
+    - pack: Keil::STM32L4xx_DFP@^3.1.0
+    - pack: ARM::CMSIS-Driver_STM32
+  setups:
+    - setup: Options for Version_0
+      processor:
+        fpu: sp
+      add-path:
+        - .
+      debug: "on"
+      define:
+        - VERSION: "0"
+      misc:
+        - C:
+            - -std=c99
+          C-CPP:
+            - -fno-rtti
+            - -funsigned-char
+            - -fshort-enums
+            - -fshort-wchar
+            - -ffunction-sections
+            - -Wno-packed
+            - -Wno-missing-variable-declarations
+            - -Wno-missing-prototypes
+            - -Wno-missing-noreturn
+            - -Wno-sign-conversion
+            - -Wno-nonportable-include-path
+            - -Wno-reserved-id-macro
+            - -Wno-unused-macros
+            - -Wno-documentation-unknown-command
+            - -Wno-documentation
+            - -Wno-license-management
+            - -Wno-parentheses-equality
+          CPP:
+            - -xc++
+            - -std=c++11
+            - -fno-exceptions
+          ASM:
+            - -masm=auto
+          Link:
+            - --map
+            - --load_addr_map_info
+            - --xref
+            - --callgraph
+            - --symbols
+            - --info sizes
+            - --info totals
+            - --info unused
+            - --info veneers
+            - --symdefs=preserved.o
+            - --strict
+            - --summary_stderr
+            - --info summarysizes
+  linker:
+    - script: test_v0.sct
+  groups:
+    - group: Source Group 1
+      files:
+        - file: preserved_v0.c
+        - file: SwitchCode.c
+        - file: stdout_user.c
+  components:
+    - component: ARM::CMSIS-Compiler:CORE
+    - component: ARM::CMSIS:CORE
+    - component: Keil::Device:CubeMX
+    - component: CMSIS-Compiler:STDOUT:Custom
+    - component: CMSIS Driver:USART

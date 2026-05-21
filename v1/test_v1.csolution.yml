@@ -1,0 +1,23 @@
+solution:
+  created-by: uv2csolution@1.6.0
+  created-for: CMSIS-Toolbox@2.12.0
+  compiler: AC6
+  target-types:
+    - type: Version_1
+      device: STM32L476RGTx
+      optimize: debug
+      target-set:
+        - set:
+          images:
+            - image: $bin(test_v1)$
+              load: image
+              load-offset: 0x08080000
+            - project-context: test_v1
+              load: symbols
+          debugger:
+            name: ST-Link@pyOCD
+            port: 3333
+            protocol: swd
+            clock: 4000000
+  projects:
+    - project: test_v1.cproject.yml
