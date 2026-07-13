@@ -38,18 +38,32 @@ The application has two versions of a firmware to demonstrate the switch mechani
 - `v0`: counts seconds and prints them on USART2.
 - `v1`: adds minute counting and prints `MM:SS`.
 
-Both versions are complete firmware images. Version 0 is programmed into flash bank 1 at `0x08000000`. Version 1 is programmed into flash bank 2 at `0x08080000`. While version 0 is running, pressing the user button calls the switch code. If the image in the other bank is valid and has a higher version number, execution moves to that image without a reset. The second counter is kept alive across the switch.
+Both versions are complete firmware images. Version 0 is programmed into flash bank 0 at `0x08000000`. Version 1 is programmed into flash bank 1 at `0x08080000`. While version 0 is running, pressing the user button calls the switch code. If the image in the other bank is valid and has a higher version number, execution moves to that image without a reset. The second counter is kept alive across the switch.
 
 The example also copies exception vector handlers to RAM for faster execution. However, this is not the focus of the switch mechanism example. So it is not covered in the documentation of the example.
+
+## Core Idea
+
+The live update works by keeping a few things stable between all firmware versions:
+
+1. Each image contains a version/signature block at a fixed location.
+2. Each image contains identical switch code at a fixed location.
+3. Variables that must survive the update are placed at fixed RAM addresses.
+4. The switch code remaps the flash banks, points `VTOR` to the new vector table
+   in SRAM, and jumps to the C runtime startup entry of the new image.
+
+The jump target is the new image's `__main`, not its `main()`. This is important: the C runtime for the new image still initializes the new image's
+data before entering `main()`. Preserved variables are excluded from that normal initialization path.
+
 
 ## Making the initial version updateable
 
 
 ### Version Number in Flash
 
-To determine if a flash bank has a newer version of the firmware, a version info in flash at a fixed address is required.
+To determine whether a flash bank contains a newer firmware version, the flash bank must store version information at a fixed address.
 
-In the example a 32bit variable is put in the .version section. This section gets located after the vector table (behind the `ER_RESET`). Together with a signature from the switch code, this is the way to identify a valid firmware.
+In this example, a 32-bit variable is stored in the .version section. The linker places this section after the vector table, following `ER_RESET`. Software uses the version information together with the switch code signature to verify that the firmware is valid.
 ```
   ER_VERSION +0
   {
@@ -60,12 +74,13 @@ In the example a 32bit variable is put in the .version section. This section get
 
 ### Switch Code
 
-Implement the switch code, which must be the same in each version, and locate it at a fixed address. This code will actually jump to the library startup label __main of the new version after the switch. With this, the Stack Pointer is setup and the not preserved variables get initialized.
-The switch code also contains the `NMI_Handler()`, which, depending on its trigger sources, could occur at any time.
+Implement the switch code so that it is identical in every firmware version, and place it at a fixed address. After the firmware switch, the code branches to the startup label `__main` in the new firmware version. The startup code sets up the stack pointer and initializes the variables that are not preserved across the switch.
 
-In the example, this is the SwitchCode.c module. It uses a table with constant data, which starts with the signature. There is also the entry point to the application, normally it is the `__main` label. The `SwitchEntry()` function does the switch if it finds a newer version in the other flash bank.
+The switch code also includes `NMI_Handler()`, because an NMI can occur at any time, depending on its trigger source.
 
-The table with the signature was already placed with the version information. And the code is placed with the scatter file behind the `ER_VERSION`, which has a fixed size. So, the location for the SwitchCode is also fix:
+In this example, the SwitchCode.c module contains a table of constant data. The first entry in the table is the firmware signature. The table also contains the application entry point, which is typically the `__main` label. The `SwitchEntry()` function switches to the firmware in the other flash bank if it detects a newer firmware version.
+
+The signature table is already placed with the version information. The scatter file places the code from `SwitchCode.c` immediately after `ER_VERSION`, which has a fixed size. As a result, the switch code is always located at a fixed address:
 ```
   ER_SWITCHCODE +0   {  ; load address = execution address
     switchcode.o( .text.* )
@@ -74,34 +89,34 @@ The table with the signature was already placed with the version information. An
 
 ### Preserved Variables
 
-When thinking about future versions, what variables of this version should be preserved during a live update? These variables should be collected in a block that gets located at some location that can still be expanded for future preserved variables.
+When thinking about future firmware versions, identify the variables that must be preserved during a live update. Group these variables in a dedicated memory block and place the block in a reserved location with enough space for additional preserved variables in later versions.
 
-In this example, these variables are in the preserved_v0.c module and located with the scatter file at the beginning of the internal RAM:
+In this example, the preserved variables are defined in `preserved_v0.c`. The scatter file places them at the beginning of the internal RAM.
 ```
   RW_PRESERVED_V0 0x20000000 0x00000100  {
     preserved_v0.o (+ZI +RW)
   }
 ```
-To make the preserved variables available in the application, add extern definitions in a header file and include this where required.
+To make the preserved variables available to the application, add extern declarations to a header file and include the header file where required.
 
 
 ### Switch Variable
 
-As the new version will run from the `__main` label, the main application may not need to initialize certain things again, like the clock and the gpio pins. For this, one preserved variable is set before the switch and is then used to make this decision. This variable also needs to be manually initialized to 0 in the reset handler, in case an updated version runs after power-on.
+Because the new firmware starts at the `__main` label, the application does not need to reinitialize components such as the clock and GPIO pins after a live update. Before the switch, set a preserved variable that indicates whether this initialization should be skipped. Initialize this variable to 0 in the reset handler so that a normal boot after power-on performs the required initialization.
 
-In the example, the variable is called “Switched”.
+In this example, the preserved variable is named `Switched`.
 
 
 ### Symdefs file
 
-To make it possible to use preserved variables at the same location in a future version, the linker can create a symdefs file. After building, the file needs to be edited to contain only the preserved variables.
+To use preserved variables at the same addresses in future firmware versions, generate a symdefs file with the linker. After the build completes, edit the file to contain only the preserved variable symbols.
 
-The example uses the linker option:
+The example uses the following linker option to generate the symdefs file:
 
 ```
 --symdefs=preserved.o
 ```
-and contains these variables after removing all not-preserved data:
+After removing all symbols except the preserved variable symbols, the file contains:
 ```
 0x20000000 D LastMilliseconds
 0x20000004 D LongestMilliseconds
@@ -113,36 +128,36 @@ and contains these variables after removing all not-preserved data:
 
 ### Doing the Switch
 
-When a new firmware version has been programmed to the other bank, switching is done by setting the Switch variable to 1 and calling the `SwitchEntry()` function.
+After programming a new firmware version to the other flash bank, set the Switch variable to 1 and call the `SwitchEntry()` function to perform the switch.
 
-The example simulates the by wating for the pressing of the user button on the board.
+The example simulates this by waiting for the user to press the User button on the board.
 
 ## Prepare a future version to be switched to
 
 
 ### Modify the application
 
-As required, add new functionallity and/or fix bugs.
+Update the firmware by adding new functionality or fixing bugs, as required.
 
 
 ### Add/Remove files related to the switching
 
-The switch code shall be constant. So, remove its source from the project and include the object file from the initial version build instead. Add also the symdefs file from the previous build to the project. This makes the preserved variables available at the same locations. And replace the module for the new preserved variables with a new one. 
+Keep the switch code unchanged. Remove its source file from the project and include the object file from the initial firmware build instead. Add the symdefs file from the previous build to the project to use the preserved variables at the same addresses. Replace the previous preserved-variable module with the module for the new firmware version.
 
-- Replace SwitchCode.c with SwitchCode.o from the initial version build
-- Add preserved.o (symdefs file from previous version) to the project
-- Replace preserved_v0.c with preserved_v1.c
+- Replace `SwitchCode.c` with `SwitchCode.o` from the initial version build
+- Add `preserved.o` (symdefs file from previous version) to the project
+- Replace `preserved_v0.c` with `preserved_v1.c`
 
 
 ### Previously preserved variables
 
-To modify the scatter file, check the actual size of the preserved variables block in the mapfile of the previous version and rename/change the related region, so that it covers the variables in the symdefs file.
+Check the size of the preserved-variable block in the previous version's map file. Update the corresponding region in the scatter file by renaming it, if required, and adjusting its size so that it covers all preserved variables defined in the symdefs file.
 
-For the example, there is in the mapfile:
+For this example, the map file contains:
 ```
 Execution Region RW_PRESERVED_V0 (Exec base: 0x20000000, Load base: 0x08002fc8, Size: 0x00000018, Max: 0x00000100, ABSOLUTE)
 ```
-In the new scatter file, RW_PRESERVED_V0 becomes:
+In the new scatter file, `RW_PRESERVED_V0` becomes the following:
 ```
   RW_PRESERVED 0x20000000 EMPTY UNINIT 0x00000018  {
   }
@@ -150,28 +165,30 @@ In the new scatter file, RW_PRESERVED_V0 becomes:
 
 ### Add new preserved variables
 
-For the new preserved variables, add a new region to the scatter file and put the variables again in a common block. And this new block should be located right after the previously preserved variables region, so that the block covering the symdefs area can be extended in the next version. The new variables also need an extern definition in the header file.
+For the new preserved variables, add a new region to the scatter file and group the variables in a common block. Place the new block immediately after the region that contains the previously preserved variables. This layout allows the region defined by the symdefs file to expand in future firmware versions. Add extern declarations for the new variables to the header file.
 
-For the example, the following is added right after RW_PRESERVED:
+In this example, the following region is added immediately after `RW_PRESERVED`:
 ```
   RW_PRESERVED_V1 +0    {
     preserved_v1.o (+ZI +RW)
   }
 ```
-The new version also counts minutes. So, the declaration of this is now in preserved_v1.c. And an extern definition is added to preserved.h.
+The new firmware version also counts minutes. The minute counter is declared in `preserved_v1.c`, and `preserved.h` contains the corresponding extern declaration.
 
 
 ### Handling of the Switch variable
 
-In case the new version starts up after a switch, the variable is 1, and the software can skip initialization of all preserved resources, which are also hardware peripherals. Most notably, this is the clock setup.
-But in case of booting after a power-on reset, where the Switch variable is 0, all this initialization needs to be done. In addition to that, all preserved variables from the previous version have to be manually initialized.
+If the new firmware starts after a live update, the Switched variable is set to 1. The software skips initialization of preserved resources, including hardware peripherals such as the clock.
 
+If the firmware starts after a power-on reset, the Switched variable is 0. The software initializes all preserved resources and manually initializes the preserved variables from the previous firmware version.
 
 ### Update symdefs file
 
-Every next version should preserve the variables that the previous version had already preserved and that this version added to the preserved variables. For that, the new version needs all preserved variables in the symdefs file. To do that, delete the symdefs file in the current version output folder, build new and edit it to contain just the preserved variables. The next version then builds with this file.
+Each new firmware version must preserve the variables from the previous firmware version as well as any new preserved variables that it introduces. To achieve this, the symdefs file must contain all preserved variable symbols.
 
-For the example, preserved.o in the current version output folder was deleted. After a rebuild and edit, it contains:
+Delete the existing symdefs file from the current build output directory, rebuild the project, and edit the generated file so that it contains only the preserved variable symbols. Use this updated symdefs file when you build the next firmware version.
+
+In this example, preserved.o was deleted from the current build output directory. After rebuilding the project, the regenerated object file contains the following symbols:
 ```
 0x20000000 D LastMilliseconds
 0x20000004 D LongestMilliseconds
