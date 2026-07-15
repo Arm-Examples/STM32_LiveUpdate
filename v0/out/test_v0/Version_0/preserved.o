@@ -1,0 +1,7 @@
+#<SYMDEFS># ARM Linker, 6240002: Last Updated: Tue Jul 14 14:58:53 2026
+0x20000000 D LastMilliseconds
+0x20000004 D LongestMilliseconds
+0x20000008 D Milliseconds
+0x2000000c D Seconds
+0x20000010 D Switched
+0x20000014 D Tick
