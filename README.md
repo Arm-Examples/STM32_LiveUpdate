@@ -12,19 +12,19 @@ The same idea can be used on many devices, but the bank mapping, flash layout, a
    from the VS Code marketplace.
 2. Clone this repository, for example using
    [Git in VS Code](https://code.visualstudio.com/docs/sourcecontrol/intro-to-git),
-   or download the ZIP file. Then open the repository root folder in VS Code.
+   or download the ZIP file. Then open the repository root folder containing the [`LiveUpdate.code-workspace`](LiveUpdate.code-workspace) in VS Code.
 3. Connect the NUCLEO-L476RG board to the PC.
 4. Open the
-   [CMSIS View](https://mdk-packs.github.io/vscode-cmsis-csolution/) in VS Code
+   [CMSIS View](https://github.com/Open-CMSIS-Pack/vscode-cmsis-solution#cmsis-view) in VS Code, click on "Open Solution in Workspace" 
    and select
-   [`v0/test_v0.csolution.yml`](v0/test_v0.csolution.yml) as the active
+   [`v0/test_v0`](v0/test_v0.csolution.yml) as the active
    solution.
 5. Let the related tools and software packs download and install. Review
    progress with **View > Output > CMSIS Solution**.
 6. Build and load version 0 with the CMSIS View
-   [action buttons](https://mdk-packs.github.io/vscode-cmsis-csolution/build/).
+   [action buttons](https://github.com/Open-CMSIS-Pack/vscode-cmsis-solution#action-buttons).
    This programs the first image at `0x08000000`.
-7. Select [`v1/test_v1.csolution.yml`](v1/test_v1.csolution.yml) as the active
+7. From the [action buttons menu](https://github.com/Open-CMSIS-Pack/vscode-cmsis-solution#action-buttons), choose "Open Solution in Workspace..." and select [`v1/test_v1`](v1/test_v1.csolution.yml) as the active
    solution.
 8. Build and load version 1. This solution loads the second image at
    `0x08080000`.
